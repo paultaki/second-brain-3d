@@ -59,12 +59,30 @@ def find_vault(explicit: Path | None) -> Path:
         "No .obsidian/ folder found above this script.\n"
         "Pass --vault /path/to/your/vault, or place this folder inside one.")
 
+
+def check_vault_root(vault: Path) -> Path:
+    # A vault whose ROOT is itself a private-named folder would make the rails
+    # meaningless (children carry no private path component). Refuse, fail-closed.
+    if is_private_name(vault.name):
+        raise SystemExit(
+            f"REFUSING: vault root '{vault.name}' is a private-named folder "
+            f"({', '.join(sorted(PRIVATE_DIR_NAMES))}).\n"
+            "Point --vault at the folder ABOVE it, or rename the vault.")
+    return vault
+
 # --------------------------------------------------------------------------- #
 # Safety / scope configuration
 # --------------------------------------------------------------------------- #
 # Folder names that are NEVER walked, read, counted, or emitted, at any depth.
-# HARD RULE, no flag. A fail-closed assertion re-verifies after the scan.
+# HARD RULE, no flag. A fail-closed check re-verifies after the scan.
+# Matched case-insensitively: on the case-insensitive filesystems this mostly
+# runs on (APFS, NTFS), "private/" IS "Private/" and must be caught as such.
 PRIVATE_DIR_NAMES = {"90-Private", "Private", "_private"}
+_PRIVATE_LOWER = {n.lower() for n in PRIVATE_DIR_NAMES}
+
+
+def is_private_name(name: str) -> bool:
+    return name.lower() in _PRIVATE_LOWER
 
 # Directory names pruned at traversal level anywhere in the tree. The private
 # set is non-negotiable; the rest are noise or third-party content.
@@ -112,8 +130,19 @@ FOLDER_TO_CAT = None
 
 AUTO_PALETTE = ["#FFB020", "#2EC4B6", "#3A86FF", "#FF4D9D", "#B892FF",
                 "#E0AAFF", "#FF7A5C", "#FFD166", "#4DEEA9", "#6FA9C4"]
-DAILY_NAME_RE = re.compile(r"(daily|weekly|monthly|journal|log)s?$", re.I)
-ARCHIVE_NAME_RE = re.compile(r"archive", re.I)
+_LABEL_STRIP_RE = re.compile(r"^[\d\-_. ]+")
+_DAILY_RE = re.compile(r"(daily|weekly|monthly|journal|log)s?(\s+notes?)?", re.I)
+
+
+def _tier_for(folder: str) -> int:
+    """Whole-name matching on the cleaned folder name, so 'Blog', 'Catalog',
+    and 'unarchived' don't false-positive the way substring checks did."""
+    core = _LABEL_STRIP_RE.sub("", folder).strip().lower()
+    if core.startswith("archive"):        # archive, archives, archived, archive 2023
+        return 2
+    if _DAILY_RE.fullmatch(core):
+        return 1
+    return 0
 
 
 def derive_taxonomy(note_paths: list[Path], vault: Path):
@@ -133,9 +162,8 @@ def derive_taxonomy(note_paths: list[Path], vault: Path):
         while key in used_keys:
             key += "x"
         used_keys.add(key)
-        label = re.sub(r"^[\d\-_. ]+", "", folder).strip() or folder
-        tier = (2 if ARCHIVE_NAME_RE.search(folder)
-                else 1 if DAILY_NAME_RE.search(folder) else 0)
+        label = _LABEL_STRIP_RE.sub("", folder).strip() or folder
+        tier = _tier_for(folder)
         color = "#5C6784" if tier == 2 else AUTO_PALETTE[i % len(AUTO_PALETTE)]
         cats.append((key, label, color, tier))
         folder_map[folder] = key
@@ -150,21 +178,28 @@ FM_TITLE_RE = re.compile(r"^title:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def is_sensitive(rel_posix: str) -> bool:
-    return any(rel_posix.startswith(p + "/") for p in SENSITIVE_SUBPATHS)
+    """Root-relative match: the folder's subtree, the exact path, or a same-named
+    single note (e.g. 'Areas/Family' also gates 'Areas/Family.md')."""
+    for p in SENSITIVE_SUBPATHS:
+        if rel_posix.startswith(p + "/") or rel_posix == p or rel_posix == p + ".md":
+            return True
+    return False
 
 
-def resolve_target(raw: str) -> str:
-    """Normalize a raw wikilink body to a lookup key (basename, lowercased)."""
+def resolve_target(raw: str) -> tuple[str | None, str]:
+    """Normalize a raw wikilink body to (path_key, basename_key), lowercased.
+    path_key is set only for path-style links ([[folder/Name]]) and is tried
+    first against the full-relpath index; basename is the fallback."""
     # strip display alias, heading anchor, block ref
     raw = raw.split("|", 1)[0]
     raw = raw.split("#", 1)[0]
     raw = raw.split("^", 1)[0]
     raw = raw.strip()
-    if "/" in raw:                        # [[folder/Name]] -> Name
-        raw = raw.rsplit("/", 1)[-1]
     if raw.lower().endswith(".md"):
         raw = raw[:-3]
-    return raw.strip().lower()
+    path_key = raw.lower() if "/" in raw else None
+    base = raw.rsplit("/", 1)[-1].strip().lower()
+    return path_key, base
 
 
 def title_for(text: str, stem: str) -> str:
@@ -214,11 +249,25 @@ def walk_notes(vault: Path) -> list[Path]:
     import os
     notes: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(vault):
-        # prune excluded dirs IN PLACE so they are never descended into
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES]
+        dp = Path(dirpath)
+        # prune IN PLACE so excluded dirs are never descended into. Private
+        # names match case-insensitively; this tool's own folder is skipped so
+        # cloning it into a vault doesn't index its README as a note.
+        dirnames[:] = [d for d in dirnames
+                       if d not in EXCLUDE_DIR_NAMES
+                       and not is_private_name(d)
+                       and (dp / d).resolve() != SCRIPT_DIR]
+        if dp.resolve() == SCRIPT_DIR:
+            continue
         for fn in filenames:
-            if fn.endswith(".md"):
-                notes.append(Path(dirpath) / fn)
+            if not fn.endswith(".md"):
+                continue
+            p = dp / fn
+            # SAFETY: a symlinked .md would read whatever it points at (possibly
+            # a private note) while wearing a public path. Never follow.
+            if p.is_symlink():
+                continue
+            notes.append(p)
     return notes
 
 
@@ -254,7 +303,7 @@ def build_graph(vault: Path) -> dict:
         rel_posix = rel.as_posix()
 
         # SAFETY: never let a private path through, belt-and-suspenders.
-        if any(part in PRIVATE_DIR_NAMES for part in rel.parts):
+        if any(is_private_name(part) for part in rel.parts):
             raise SystemExit(f"REFUSING: private path surfaced: {rel_posix}")
         if not INCLUDE_SENSITIVE_AREAS and is_sensitive(rel_posix):
             continue
@@ -301,11 +350,12 @@ def build_graph(vault: Path) -> dict:
 
     for src_id, text in raw_texts.items():
         for _bang, body in WIKILINK_RE.findall(text):
-            key = resolve_target(body)
-            if not key:
+            path_key, base_key = resolve_target(body)
+            if not base_key:
                 continue
-            # try full relpath match first (path-style links), then basename
-            tgt_id = by_relpath.get(key) or by_basename.get(key)
+            # full relpath match first (path-style links), then basename
+            tgt_id = ((by_relpath.get(path_key) if path_key else None)
+                      or by_basename.get(base_key))
             if tgt_id is None:
                 unresolved += 1
                 continue
@@ -319,12 +369,13 @@ def build_graph(vault: Path) -> dict:
             nodes[src_id]["deg"] += 1
             nodes[tgt_id]["deg"] += 1
 
-    # ---- final safety assertion ------------------------------------------- #
+    # ---- final safety check (real raises, not asserts: python -O strips
+    # asserts and this line must survive any interpreter flag) --------------- #
     for nid in nodes:
-        assert not any(part in PRIVATE_DIR_NAMES for part in nid.split("/")), \
-            f"LEAK: {nid}"
-        if not INCLUDE_SENSITIVE_AREAS:
-            assert not is_sensitive(nid), f"SENSITIVE LEAK: {nid}"
+        if any(is_private_name(part) for part in nid.split("/")):
+            raise SystemExit(f"LEAK: {nid}")
+        if not INCLUDE_SENSITIVE_AREAS and is_sensitive(nid):
+            raise SystemExit(f"SENSITIVE LEAK: {nid}")
 
     node_list = list(nodes.values())
     counts: dict[str, int] = {}
@@ -394,7 +445,7 @@ def main() -> None:
                     help="output HTML path (default: brain.html next to this script)")
     args = ap.parse_args()
 
-    vault = find_vault(args.vault)
+    vault = check_vault_root(find_vault(args.vault))
     output = (args.output or OUTPUT).expanduser().resolve()
     graph = build_graph(vault)
     inject(graph, output)

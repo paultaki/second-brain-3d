@@ -503,7 +503,7 @@
 
 <div id="err"><div class="card panel">
   <h3>No Graph Data</h3>
-  <p>Run <code>python3 generate.py --open</code> in <code>99-Meta/brain/</code> to index the vault and rebuild this file.</p>
+  <p>Run <code>python3 generate.py --open</code> in this file's folder to index the vault and rebuild it.</p>
 </div></div>
 
 <div id="veil">
@@ -604,11 +604,13 @@
   /* 3d-force-graph is Kapsule-style: factory(config) returns a component that
      is then applied to a DOM element. Fall back to class-style construction
      if a future vendor bump changes the convention. */
-  /* no preserveDrawingBuffer: snap() re-renders synchronously in the same task
-     before reading the canvas, and the flag costs GPU time on every frame */
+  /* preserveDrawingBuffer stays ON for Snap: same-task readback after an
+     explicit render works on Chromium but is NOT spec-guaranteed, and Safari
+     has a history of compositing first; a silently black share card is worse
+     than the flag's small per-frame cost */
   var GRAPH_CFG = {
     controlType: 'orbit',
-    rendererConfig: { powerPreference: 'high-performance' }
+    rendererConfig: { preserveDrawingBuffer: true, powerPreference: 'high-performance' }
   };
   var Graph;
   try {
@@ -692,12 +694,16 @@
     if (s) g.add(s);
     return g;
   }
-  function tooltip(n) {
-    var name = String(n.name).replace(/[&<>"]/g, function (c) {
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
-    var cat = CATS[n.cat] ? CATS[n.cat].label : n.cat;
-    return '<div style="font-weight:600">' + name + '</div>' +
+  }
+  function tooltip(n) {
+    /* the lib injects this via innerHTML: escape EVERYTHING vault-derived,
+       category labels included (auto-taxonomy labels are raw folder names) */
+    var cat = esc(CATS[n.cat] ? CATS[n.cat].label : n.cat);
+    return '<div style="font-weight:600">' + esc(n.name) + '</div>' +
       '<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#7d93a7;margin-top:3px">' +
       cat + ' · ' + n.deg + ' links</div>';
   }
@@ -877,6 +883,8 @@
         applyFilter();
       });
       row.addEventListener('mouseenter', function () {
+        hoverNode = null;      /* preview overwrites hover state; don't let the
+                                  guard skip re-highlighting that node later */
         if (selected) return;
         previewCat = c.key;
         hiCore.clear(); hiNodes.clear(); hiLinks.clear();
@@ -887,6 +895,7 @@
       });
       row.addEventListener('mouseleave', function () {
         previewCat = null;
+        hoverNode = null;
         if (selected) return;
         hiCore.clear(); hiNodes.clear(); hiLinks.clear(); repaint();
       });
@@ -1034,11 +1043,14 @@
   function bfs(a, b) {
     if (a === b) return [a];
     var prev = new Map(); prev.set(a.id, null);
-    var q = [a];
-    while (q.length) {
-      var cur = q.shift();
+    var q = [a], qi = 0;
+    while (qi < q.length) {
+      var cur = q[qi++];
       for (var i = 0; i < cur.nbr.length; i++) {
         var nx = cur.nbr[i];
+        /* never route through nodes outside the current scope or a hidden
+           category: they aren't on screen and shouldn't surface in the path */
+        if (!inScope(nx) || !passFilter(nx)) continue;
         if (prev.has(nx.id)) continue;
         prev.set(nx.id, cur);
         if (nx === b) {
@@ -1152,14 +1164,14 @@
   function hideCine() { $('cine').classList.remove('on'); }
 
   /* scope switches rebuild every three.js object; own the beat instead of
-     looking frozen */
+     looking frozen. Called BEFORE render() so the caption is on screen when
+     the synchronous rebuild locks the main thread. */
   var rewireTimer = null;
-  function flashRewire() {
+  function flashRewire(count) {
     if (cine.mode) return;
-    showCine('', 're-wiring ' +
-      Graph.graphData().nodes.length.toLocaleString() + ' synapses', 0);
+    showCine('', 're-wiring ' + count.toLocaleString() + ' synapses', 0);
     clearTimeout(rewireTimer);
-    rewireTimer = setTimeout(function () { if (!cine.mode) hideCine(); }, 1600);
+    rewireTimer = setTimeout(function () { if (!cine.mode) hideCine(); }, 1900);
   }
 
   function burstFrom(node, cap) {
@@ -1402,6 +1414,7 @@
     labelsOn = !labelsOn;
     $('t-labels').classList.toggle('on', labelsOn);
     Graph.nodeThreeObject(nodeObject);   /* rebuild node objects with/without sprites */
+    repaint();   /* rebuilt meshes all get the normal material; restore hi/dim state */
   });
   $('t-pulse').addEventListener('click', function () { setPulse(!pulseOn); });
   $('t-genesis').addEventListener('click', function () {
@@ -1415,11 +1428,18 @@
       document.querySelectorAll('.sc').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
       scopeTier = +b.dataset.tier;
-      clearFocus(); render();
-      flashRewire();
+      stopCinema();                     /* land any cinematic before the swap */
+      clearFocus();
+      flashRewire(DATA.nodes.filter(inScope).length);
       results.classList.remove('on');   /* results from the old scope are stale */
       clearTimeout(pendingFit);
-      pendingFit = setTimeout(function () { Graph.zoomToFit(1100, 70, passFilter); }, 1400);
+      /* double-rAF so the caption PAINTS before the synchronous object
+         rebuild + physics warmup lock the main thread */
+      requestAnimationFrame(function () { requestAnimationFrame(function () {
+        render();
+        clearTimeout(pendingFit);
+        pendingFit = setTimeout(function () { Graph.zoomToFit(1100, 70, passFilter); }, 1400);
+      }); });
     });
   });
   addEventListener('keydown', function (e) {
