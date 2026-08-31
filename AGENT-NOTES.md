@@ -1,0 +1,8 @@
+# Agent Notes
+
+## 2026-08-30 · claude-code
+
+- **Did:** Extracted Second Brain 3D from the AgentWorkspace vault (`99-Meta/brain/`) into this standalone repo and hardened it for publication. Perf pass (pixel-ratio cap 1.5, MeshBasic materials, lighter sphere geo, scaled physics warmup, hover/repaint guards → 47 FPS at 3,882 nodes), generalization (`--vault`/`--output`, `.obsidian` auto-detect, auto-derived folder taxonomy), privacy hardening (case-insensitive private-dir pruning at any depth, symlink refusal, private vault-root refusal, real raises instead of asserts), fonts embedded as data URIs (zero network requests), `obsidian://` links use vault name not absolute path, one-line vendored OrbitControls guard (see `build-vendor/VENDOR-PATCHES.md`). Three Grok adversarial review rounds: 15 + 3 findings, all fixed.
+- **Why:** Paul wants this published to GitHub as a companion to paultaki/second-brain.
+- **Next:** Push to GitHub (`gh repo create paultaki/second-brain-3d --public`) once Paul confirms; consider a demo GIF for the README (Snap/Genesis make good material).
+- **Watch out:** The vault copy at `AgentWorkspace/99-Meta/brain/` is the twin of this code — same files, but its `generate.py` keeps Paul's curated `FOLDER_TO_CAT` and `SENSITIVE_SUBPATHS`; this repo ships auto-derive + empty sensitive list. When changing code, edit the vault copy and re-sync here (config block is the only intended diff). `vendor.min.js` carries a hand patch — never rebuild without re-applying `VENDOR-PATCHES.md`. Never test this public config against Paul's real vault (it would include his gated sensitive folders); use a synthetic vault.
