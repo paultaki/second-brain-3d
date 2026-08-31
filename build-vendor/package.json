@@ -1,0 +1,10 @@
+{
+  "name": "brain-vendor",
+  "private": true,
+  "dependencies": {
+    "three": "0.185.1",
+    "3d-force-graph": "1.73.4",
+    "three-spritetext": "1.9.6",
+    "esbuild": "0.20.2"
+  }
+}
