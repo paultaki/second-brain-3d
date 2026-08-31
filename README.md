@@ -38,6 +38,8 @@ On a Mac you can also double-click `brain.command`. It re-indexes the vault (a f
 - Legend rows: hover previews a category, click toggles it, option-click solos it
 - Scope dial: Core (your working notes), Extended (adds daily notes), Full (adds archive)
 
+![Focus mode](assets/focus.png)
+
 ## Cinematics
 
 - **Genesis** (`G`) replays your vault growing note by note in creation order, with a live date readout. Creation dates come from git first-add history when the vault is a repo, with filesystem birthtime as fallback. A fast version runs on boot; any click dismisses it.
