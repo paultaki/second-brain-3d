@@ -1414,7 +1414,9 @@
     labelsOn = !labelsOn;
     $('t-labels').classList.toggle('on', labelsOn);
     Graph.nodeThreeObject(nodeObject);   /* rebuild node objects with/without sprites */
-    repaint();   /* rebuilt meshes all get the normal material; restore hi/dim state */
+    /* the rebuild is debounced inside the lib (~1ms trailing); repaint after it
+       lands or we'd restyle the about-to-be-disposed meshes */
+    setTimeout(repaint, 60);
   });
   $('t-pulse').addEventListener('click', function () { setPulse(!pulseOn); });
   $('t-genesis').addEventListener('click', function () {
@@ -1438,7 +1440,11 @@
       requestAnimationFrame(function () { requestAnimationFrame(function () {
         render();
         clearTimeout(pendingFit);
-        pendingFit = setTimeout(function () { Graph.zoomToFit(1100, 70, passFilter); }, 1400);
+        /* don't re-arm the settle fit if a focus or cinematic claimed the
+           camera during the 2-frame gap — it would have nothing to cancel */
+        if (!selected && !cine.mode) {
+          pendingFit = setTimeout(function () { Graph.zoomToFit(1100, 70, passFilter); }, 1400);
+        }
       }); });
     });
   });

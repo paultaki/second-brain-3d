@@ -257,7 +257,9 @@ def walk_notes(vault: Path) -> list[Path]:
                        if d not in EXCLUDE_DIR_NAMES
                        and not is_private_name(d)
                        and (dp / d).resolve() != SCRIPT_DIR]
-        if dp.resolve() == SCRIPT_DIR:
+        # skip the tool's own folder — unless the vault IS the tool folder, in
+        # which case its root notes are the user's notes and must be kept
+        if dp.resolve() == SCRIPT_DIR and dp.resolve() != vault.resolve():
             continue
         for fn in filenames:
             if not fn.endswith(".md"):
