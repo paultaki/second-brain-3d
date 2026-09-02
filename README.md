@@ -4,7 +4,7 @@ An interactive 3D neural map of your Obsidian vault, generated as one self-conta
 
 No plugins, no server, no build step, no network requests. One Python script (standard library only) scans your vault and writes `brain.html`. Open it in any browser.
 
-![Second Brain 3D](assets/hero.png)
+![Second Brain 3D demo](assets/demo.gif)
 
 ## Quickstart
 
