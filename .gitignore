@@ -1,3 +1,4 @@
 brain.html
 build-vendor/node_modules/
 .DS_Store
+__pycache__/
