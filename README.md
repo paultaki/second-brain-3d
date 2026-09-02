@@ -38,7 +38,7 @@ On a Mac you can also double-click `brain.command`. It re-indexes the vault (a f
 - Legend rows: hover previews a category, click toggles it, option-click solos it
 - Scope dial: Core (your working notes), Extended (adds daily notes), Full (adds archive)
 
-![Focus mode](assets/focus.png)
+![Extended scope, 3,900 notes](assets/extended-scope.png)
 
 ## Cinematics
 
