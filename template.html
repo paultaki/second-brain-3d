@@ -883,8 +883,6 @@
         applyFilter();
       });
       row.addEventListener('mouseenter', function () {
-        hoverNode = null;      /* preview overwrites hover state; don't let the
-                                  guard skip re-highlighting that node later */
         if (selected) return;
         previewCat = c.key;
         hiCore.clear(); hiNodes.clear(); hiLinks.clear();
@@ -895,7 +893,6 @@
       });
       row.addEventListener('mouseleave', function () {
         previewCat = null;
-        hoverNode = null;
         if (selected) return;
         hiCore.clear(); hiNodes.clear(); hiLinks.clear(); repaint();
       });
@@ -965,13 +962,11 @@
     }
     repaint();
   }
-  var hoverNode = null;
+  /* hover keeps the cursor + tooltip only. The dim-everything highlight fires
+     on CLICK, not hover: orbiting brushes dozens of nodes in a row and the
+     full-brain dim made the whole map strobe. */
   function onHover(node) {
     elGraph.style.cursor = node ? 'pointer' : 'grab';
-    if (cine.mode || selected || previewCat) return;
-    if (node === hoverNode) return;   /* same target: nothing to repaint */
-    hoverNode = node;
-    highlight(node);
   }
   var lastClick = { id: null, t: 0 };
   function onClick(node, ev) {
@@ -1090,7 +1085,7 @@
     });
   }
   function clearFocus() {
-    selected = null; inspected = null; hoverNode = null;
+    selected = null; inspected = null;
     hiCore.clear(); hiNodes.clear(); hiLinks.clear(); repaint();
     $('hint').style.display = '';
     $('node-view').classList.remove('on');
